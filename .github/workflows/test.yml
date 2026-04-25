@@ -1,0 +1,54 @@
+name: tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc gcovr
+
+      - name: Build tests
+        working-directory: implementation/Tests
+        run: make all
+
+      - name: Run tests
+        working-directory: implementation/Tests
+        run: make run
+
+      - name: Coverage summary (gcov)
+        working-directory: implementation/Tests
+        run: make coverage
+
+      - name: Coverage report (gcovr)
+        working-directory: implementation/Tests
+        run: |
+          gcovr build/lib --root ../.. \
+                --exclude '.*hal_host\.c' \
+                --exclude '.*hal_stm32f042\.c' \
+                --exclude-lines-by-pattern '.*GCOV_EXCL_LINE.*' \
+                --exclude-branches-by-pattern '.*GCOV_EXCL_BR_LINE.*' \
+                --exclude-branches-by-pattern '.*SENT_ASSERT.*' \
+                --exclude-branches-by-pattern '.*manager != NULL.*' \
+                --gcov-ignore-errors=no_working_dir_found \
+                --print-summary \
+                --txt build/coverage.txt \
+                --xml build/coverage.xml
+          cat build/coverage.txt
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: implementation/Tests/build/coverage.*
+          retention-days: 90

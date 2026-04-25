@@ -1,0 +1,40 @@
+# Build artefacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.elf
+*.bin
+*.hex
+*.map
+*.lst
+*.d
+
+# Build directories
+build/
+out/
+dist/
+cmake-build-*/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+.cache/
+compile_commands.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage / debug
+*.gcno
+*.gcda
+*.gcov
+coverage/
