@@ -23,13 +23,15 @@ LIB_SRCS := \
     $(IMPL_DIR)/sent_crc.c \
     $(IMPL_DIR)/sent_decoder.c \
     $(IMPL_DIR)/sent_encoder.c \
-    $(IMPL_DIR)/sent_protocol.c
+    $(IMPL_DIR)/sent_protocol.c \
+    $(IMPL_DIR)/sent_slow_channel.c
 
 TEST_SRCS := \
     test_main.c \
     test_sent_crc.c \
     test_sent_protocol.c \
     test_sent_encoder.c \
+    test_sent_slow_channel.c \
     test_sent_decoder.c \
     test_mode_manager.c
 

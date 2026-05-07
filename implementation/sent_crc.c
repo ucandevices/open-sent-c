@@ -43,3 +43,17 @@ uint8_t sent_crc4_j2716(const uint8_t* data_nibbles,
 
     return (uint8_t)(crc & 0x0FU);
 }
+
+uint8_t sent_crc6_esm_j2716(uint32_t message_bits) {
+    uint8_t crc = 0x15U;
+
+    for (int bit_idx = 23; bit_idx >= -6; --bit_idx) {
+        uint8_t bit = (bit_idx >= 0) ? (uint8_t)((message_bits >> (uint8_t)bit_idx) & 1U) : 0U;
+        uint8_t feedback = (uint8_t)(crc & 0x20U);
+        crc = (uint8_t)(((crc << 1U) | bit) & 0x3FU);
+        if (feedback != 0U) {
+            crc ^= 0x19U;
+        }
+    }
+    return (uint8_t)(crc & 0x3FU);
+}

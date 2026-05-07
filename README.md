@@ -2,23 +2,93 @@
 
 [![tests](https://github.com/ucandevices/open-sent-c/actions/workflows/test.yml/badge.svg)](https://github.com/ucandevices/open-sent-c/actions/workflows/test.yml)
 
-A portable C implementation of the SAE J2716 SENT (Single Edge Nibble Transmission)
-protocol for embedded systems and host-side tooling.
+Portable C implementation of the SAE J2716 SENT (Single Edge Nibble
+Transmission) protocol. MCU-agnostic protocol layer + a small HAL vtable
+(`hal.h`) implemented per target; ports for STM32F042 and a host stub
+ship in `implementation/`.
 
 ## Layout
 
 ```
-.
-├── *.h                 public API headers
-└── implementation/     library sources (.c) and platform ports
+*.h                  public API headers
+implementation/      sources, HAL ports, tests
+logic_plugin/        Saleae Logic 2 decoder
 ```
 
-The protocol layer (`sent_protocol`, `sent_encoder`, `sent_decoder`, `sent_crc`)
-is MCU-agnostic and uses the `hal.h` function-pointer interface to talk to
-hardware. Platform-specific ports live alongside the protocol code:
+## Public API
 
-- `hal_stm32f042.{h,c}` — STM32F042 (TIM input-capture RX, software TX) port
-- `hal_host.{h,c}` — host-side stub for unit tests
+- `sent_protocol.h` — frame/config types, nibble packing
+- `sent_encoder.h` — frame → tick intervals → µs timestamps
+- `sent_decoder.h` — µs timestamps → decoded frame
+- `sent_crc.h` — J2716 4-bit CRC (fast frame) and 6-bit CRC (Enhanced Serial)
+- `sent_slow_channel.h` — slow (serial) channel reassembler
+- `mode_manager.h` — RX/TX/STOPPED state machine + statistics
+- `hal.h` / `hal_config.h` — HAL vtable a port must implement
+
+All encoding/decoding works in **ticks**, not µs, so the logic is
+independent of the physical tick period.
+
+## Fast channel
+
+A J2716 fast frame is a sequence of falling-edge intervals:
+
+```
+sync (56 ticks) │ status (4b) │ data×N (1–6 nibbles) │ CRC (4b) │ pause
+```
+
+Each nibble is encoded as `ticks = value + 12`, so a nibble pulse is
+12–27 ticks. CRC is 4-bit J2716 (`sent_crc.h`); `sent_config_t` selects
+`DATA_ONLY` vs `STATUS_AND_DATA` and seed `0x03` (APR2016) vs `0x05`
+(legacy).
+
+**Encode** (`sent_encoder.h`) — `sent_frame_t` →
+`sent_build_intervals_ticks()` → tick array →
+`sent_intervals_to_timestamps_us()` → absolute µs edge timestamps. The
+HAL TX path consumes the tick array; tests use the timestamp array to
+feed the decoder.
+
+**Decode** (`sent_decoder.h`) — absolute falling-edge timestamps →
+`sent_decode_from_timestamps_us()` → `sent_frame_t`. Tolerates ±35%
+per-interval jitter and scans every candidate sync position in the
+window, so a stray leading edge from sync detection does not block
+decoding. Returns a `sent_decode_status_t` (`OK` / `SYNC_ERROR` /
+`CRC_ERROR` / `SHAPE_ERROR`) even on failure.
+
+```c
+sent_frame_t frame;
+sent_decode_status_t st;
+if (sent_decode_from_timestamps_us(&cfg, ts, n, &frame, &st)) {
+    /* frame.status, frame.data_nibbles[0..count-1], frame.crc valid */
+}
+```
+
+## Slow channel
+
+Bits 2 and 3 of every fast-frame status nibble carry the J2716 slow
+channel. Feed each fast frame's status nibble in; the call returns
+`true` and fills `out_message` once a complete CRC-valid message arrives.
+
+```c
+sent_slow_channel_t slow;
+sent_slow_channel_init(&slow);
+
+sent_slow_message_t msg;
+if (sent_slow_channel_process_status(&slow, frame.status_nibble, &msg)) {
+    /* msg.format / msg.message_id / msg.data are valid */
+}
+```
+
+Decoded formats (see `sent_slow_channel.h` for the full enum/struct):
+
+| `format`                         | ID bits | Data bits | CRC                       |
+|----------------------------------|---------|-----------|---------------------------|
+| `SENT_SLOW_FORMAT_SHORT`         | 4       | 8         | 4-bit J2716 over id+data  |
+| `SENT_SLOW_FORMAT_ENHANCED_12_8` | 8       | 12        | 6-bit J2716 over 24-bit body |
+| `SENT_SLOW_FORMAT_ENHANCED_16_4` | 4       | 16        | 6-bit J2716 over 24-bit body |
+
+The Enhanced sync pattern (`0x7E` on bit 3) takes priority and resets
+any in-flight Short Serial state, so a sensor switching modes recovers
+without an explicit `reset()`.
 
 ## Architecture
 
@@ -120,86 +190,29 @@ SENT output pin
 | Portable C99 | protocol layer compiles on any C99 toolchain; platform code is isolated behind `hal_config.h` guards |
 | 100% test coverage | host HAL + test suite exercise every reachable line and branch |
 
-## Public API
+## Build / use
 
-- `sent_protocol.h` — frame/config types, nibble packing
-- `sent_encoder.h` — frame → tick intervals → microsecond timestamps
-- `sent_decoder.h` — microsecond timestamps → decoded frame
-- `sent_crc.h` — SAE J2716 4-bit CRC
-- `mode_manager.h` — RX/TX/STOPPED state machine + statistics
-- `hal.h` / `hal_config.h` — RX/TX HAL interfaces a port must implement
+No build system of its own — put the headers on your include path,
+compile the relevant `.c` files in `implementation/`, and pick (or
+write) a HAL port against `hal.h`.
 
-## Usage
-
-The library has no build system of its own — drop the headers on your
-include path and compile the relevant `.c` files in `implementation/`
-into your project. Pick the HAL port that matches your target (or write
-your own against `hal.h`).
-
-## Testing
-
-Unit tests live in `implementation/Tests/` and are built with plain GCC
-(`-std=c99`). They use a single-header framework (`test.h`) with no external
-dependencies.
+## Tests
 
 ```sh
 cd implementation/Tests
-make run       # build and run all tests
-make coverage  # run tests + enforce 100% line and branch coverage
+make run        # build + run
+make coverage   # run + enforce 100% line/branch coverage (needs gcov + gcovr)
 ```
 
-Coverage is measured with **gcov/gcovr**. The `make coverage` target requires
-both tools to be on `PATH` (`apt-get install gcc gcovr` on Debian/Ubuntu) and
-fails if either metric drops below 100%.
+CI (`.github/workflows/test.yml`) runs the suite on every push/PR and
+uploads a `coverage` artifact (txt + Cobertura XML, 90-day retention).
 
-### CI
+## Logic 2 decoder
 
-A GitHub Actions workflow (`.github/workflows/test.yml`) runs on every push
-and pull request to `master`/`main`:
-
-1. Builds the test binary with `-O0 --coverage`.
-2. Runs all 126 tests — the job fails on any failing test.
-3. Generates a gcovr XML + text report and uploads it as a build artifact.
-
-Genuinely unreachable branches (dead code protected by configuration
-invariants) are annotated with `/* GCOV_EXCL_BR_LINE */` or suppressed via
-gcovr pattern filters so they do not inflate the denominator.
-
-### Coverage artifacts
-
-After each CI run the coverage report is uploaded as a GitHub Actions artifact
-named **`coverage`** and retained for 90 days. To download it:
-
-1. Open the [Actions tab](https://github.com/ucandevices/open-sent-c/actions).
-2. Click any completed workflow run.
-3. Scroll to the **Artifacts** section at the bottom of the page and download `coverage.zip`.
-
-The zip contains:
-- `coverage.txt` — human-readable summary table
-- `coverage.xml` — Cobertura XML (compatible with SonarQube, Codecov, VS Code extensions)
-
-## Logic 2 signal analysis
-
-`logic_plugin/` contains two tools for decoding SENT frames from a
-[Saleae Logic 2](https://www.saleae.com/) capture.
-
-**Standalone** — decode a `.sal` file directly, no GUI needed:
-```sh
-python logic_plugin/decode_sent_sal.py Session0.sal
-```
-
-**Logic 2 HLA plugin** (`logic_plugin/SENT/`) — load via Extensions →
-Load Existing Extension → select `extension.json`. Add **Async Serial**
-(10 Mbaud, 8 bits/frame, non-inverted) on the SENT channel first, then stack
-**SENT Protocol (SAE J2716)** on top with `tick_us=3.0` and `num_nibbles=6`
-(adjust for your sensor). Capture at ≥ 10 MHz for reliable CRC decoding.
-
-## Reference integration
-
-[**SENTToUSB**](https://github.com/ucandevices/SENTToUSB) is a reference
-firmware project that integrates this library on an STM32F042 to expose a
-SENT sensor over USB CDC. It demonstrates the full stack:
-HAL port (`hal_stm32f042`) wired to real hardware timers and USB transport.
+`logic_plugin/decode_sent_sal.py` decodes a `.sal` capture standalone.
+`logic_plugin/SENT/` is a Logic 2 HLA — stack it on an Async Serial
+analyzer (10 Mbaud, 8 bits, non-inverted) on the SENT channel, capture
+at ≥ 10 MHz.
 
 ## License
 

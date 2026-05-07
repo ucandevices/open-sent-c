@@ -4,9 +4,11 @@
  *     on each falling edge; overflow events call sent_stm32f042_rx_on_overflow_isr().
  *     The main loop drains completed batches via the poll_timestamps_us HAL hook.
  *
- * TX: the main loop calls submit_frame; a TIM14 compare ISR drives the SENT
- *     output pin by popping one toggle interval at a time from the flat array
- *     via sent_stm32f042_tx_pop_next_interval_ticks_from_isr(). */
+ * TX: the main loop calls submit_frame which pre-expands the frame into a flat
+ *     toggle-interval array.  The platform layer (sent_app.c) then uses DMA to
+ *     reload the timer ARR on each update, with OC toggle mode driving the pin.
+ *     sent_stm32f042_tx_pop_next_interval_ticks_from_isr() is retained for
+ *     ISR-driven platforms that do not use DMA. */
 #ifndef SENT_HAL_STM32F042_H
 #define SENT_HAL_STM32F042_H
 
@@ -104,7 +106,7 @@ void sent_stm32f042_rx_on_overflow_isr(sent_stm32f042_rx_hal_t* hal);
 /* Returns the number of timestamp batches lost because the ready queue was full. */
 uint32_t sent_stm32f042_rx_dropped_batches(const sent_stm32f042_rx_hal_t* hal);
 
-/* Call from the TIM14 compare ISR; returns false when the frame is complete. */
+/* Pop the next interval for ISR-driven TX platforms (not used in DMA mode). */
 bool sent_stm32f042_tx_pop_next_interval_ticks_from_isr(sent_stm32f042_tx_hal_t* hal,
                                                          uint16_t* out_interval_ticks);
 /* Returns 1 if a frame is in progress, 0 if idle. */

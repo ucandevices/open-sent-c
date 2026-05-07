@@ -375,10 +375,10 @@ void sent_stm32f042_tx_hal_init(sent_stm32f042_tx_hal_t* hal,
     hal->active_index = 0U;
 }
 
-/* Set the TX tick period.  Stored in config; the sent_app TIM14 driver reads it
- * from hal->config.tx_tick_x10_us when starting a new burst (tim14_kick).  The
- * caller must not change the tick while a TX burst is in flight — set between
- * frames only.  Valid range: 1..65535 (0.1 us units).  Returns true on success. */
+/* Set the TX tick period.  Stored in config; the platform TX driver reads it
+ * from hal->config.tx_tick_x10_us when starting a new burst.  Do not change
+ * while a TX burst is in flight — set between frames only.
+ * Valid range: 1..65535 (0.1 µs units).  Returns true on success. */
 static bool stm32_tx_set_tick_x10_us(void* context, uint16_t tick_x10_us) {
     sent_stm32f042_tx_hal_t* hal = (sent_stm32f042_tx_hal_t*)context;
     SENT_ASSERT(hal != NULL);

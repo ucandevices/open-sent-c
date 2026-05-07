@@ -24,6 +24,12 @@ uint8_t sent_crc4_j2716(const uint8_t* data_nibbles,
                         uint8_t status_nibble,
                         uint8_t init_seed);
 
+/* Compute the SAE J2716 Enhanced Serial Message 6-bit CRC.
+ * message_bits contains the 24 ESM CRC input bits in receive order, MSB-first:
+ * [frame 7 bit2, frame 7 bit3, ... frame 18 bit2, frame 18 bit3].
+ * Uses polynomial x^6 + x^4 + x^3 + 1 and seed 0x15. */
+uint8_t sent_crc6_esm_j2716(uint32_t message_bits);
+
 #ifdef __cplusplus
 }
 #endif
